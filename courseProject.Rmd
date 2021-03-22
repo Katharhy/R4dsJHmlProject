@@ -1,0 +1,164 @@
+---
+title: "Practical Machine Learing Project"
+subtitle: "Coursera Final Project"
+author: "Katharhy G."
+output: html_document
+---
+
+# Project Summary
+### Github Repo: 
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: <http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har>.
+
+(see the section on the Weight Lifting Exercise Dataset).
+
+## Loading libraries and statistic tools/variables.
+
+```{r loading data}
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(RColorBrewer)
+library(rattle)
+library(e1071)
+library(randomForest)
+set.seed(1)
+
+train.url <-
+        "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+test.url <- 
+        "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+path <- paste(getwd(),"/", sep="")
+train.file <- file.path(path, "pml-training.csv")
+test.file <- file.path(path, "pml-testing.csv")
+
+```
+
+## Rethriving data from necessary internal memory store.
+```{r}
+if (!file.exists(train.file)) {
+        download.file(train.url, destfile=train.file)
+}
+if (!file.exists(test.file)) {
+        download.file(test.url, destfile=test.file)
+}
+
+#The files are read into memory. Various indicators of missing data (i.e., “NA”, “#DIV/0!” and “”) are all set to NA so they can be processed.
+train.data.raw <- read.csv(train.file, na.strings=c("NA","#DIV/0!",""))
+test.data.raw <- read.csv(test.file, na.strings=c("NA","#DIV/0!",""))
+
+```
+
+## Data Cleaning and tydi
+We are removing columns that could interfere with the model holding NA values. 
+```{r unnecessary data}
+# We decided to removed the first 7 columns since they do not offer significance to the analysis of the model.
+train.data.clean1 <- train.data.raw[,8:length(colnames(train.data.raw))]
+test.data.clean1 <- test.data.raw[,8:length(colnames(test.data.raw))]
+
+# Next, we find-all columns harboring NA values a remove them.
+train.data.clean1 <- train.data.clean1[, colSums(is.na(train.data.clean1)) == 0] 
+test.data.clean1 <- test.data.clean1[, colSums(is.na(test.data.clean1)) == 0] 
+
+# Then, we inspected for (0) zero values influencing the variance predictors and cancel them out as fitted.
+nearzerov <- nearZeroVar(train.data.clean1,saveMetrics=TRUE)
+zero.var.ind <- sum(nearzerov$nearzerov)
+
+if ((zero.var.ind>0)) {
+        train.data.clean1 <- train.data.clean1[,nearzerov$nearzerov==FALSE]
+}
+```
+
+## Dividing the training data
+The training data was divided into tow groups of unequal proportions. Training data set one had 70% of the data designated to use in the execution of the model. Training data set two had the remaining 30% of the data. The second data set use in the assessment of the model.
+
+```{r training data sets}
+in.training <- createDataPartition(train.data.clean1$classe, p=0.70, list=F)
+train.data.final <- train.data.clean1[in.training, ]
+validate.data.final <- train.data.clean1[-in.training, ]
+
+```
+
+## Developing the model for this classes:
+**Class A - exactly according to the specification**
+**Class B - throwing the elbows to the front**
+**Class C - lifting the dumbbell only halfway**
+**Class D - lowering the dumbbell only halfway**
+**Class E - throwing the hips to the front**
+
+--summary--
+The Random Forest model was used to fit the train-data-final since it important variables are choice automatically. Also, Random forest model is a good source for correlation, co-variants, and outliers. The Random Forest algorithm helps to average the many steps in the decision trees within a 5-fold cross validation. Here, we trained on separated parts of the original data set; thus, minimizing possible variance. The outcome typically produces better performance avoiding bias and interpret-ability. Withe the cross-validation application, we measure how the outcomes could apply to more general and independent data. In 5-fold cross-validation, the original sample is randomly partitioned into 5 equal sub-samples, retaining one sample for validation and others to train data. The technique iterates five rounds and the results from the folds are averaged.
+
+```{r model dev.}
+control.parms <- trainControl(method="cv", 5)
+rf.model <- train(classe ~ ., data=train.data.final, method="rf", train_control=control.parms, ntree=10)
+rf.model
+```
+
+## Data validation
+We want to ensure that the data does work. We test the model on the validation data subset. We bring the predicted values using the rf.model on the validate-data-final. Here, we aim to seek how well the data fits and possible errors. The outcome of the predicted model tell how well the model works on an independent data.
+
+```{r rf.predict}
+rf.predict <- predict(rf.model, validate.data.final)
+confusionMatrix(validate.data.final$classe, rf.predict)
+
+#1  2  3  4  5  6  7  8  9 10 11 12 13 14 15 16 17 18 19 20
+# B  A  B  A  A  E  D  B  A  A  B  C  B  A  E  E  A  B  B  B
+# Levels: A B C D E
+```
+**presision = precision or accurancy**
+```{r measure presision}
+presision <- postResample(rf.predict, validate.data.final$classe)
+presi.out <- presision[1]
+
+overall.ose <- 1-as.numeric(confusionMatrix(validate.data.final$classe, rf.predict)$overall[1])
+```
+
+## Running the model
+We use the test-data to test the random forest model predicted values. Also, we added a plot to represent the class. frequency.
+```{r model test}
+test <- predict(rf.model, test.data.clean1)
+test
+plot(test)
+```
+
+## Plot a vizual representation of the tree.
+
+```{r tree plot}
+treeModel <- rpart(classe ~ ., data=train.data.final, method="class")
+fancyRpartPlot(treeModel)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
